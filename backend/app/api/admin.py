@@ -13,13 +13,11 @@ router = APIRouter(prefix="/admin", tags=["管理后台"])
 
 
 def check_admin(user: User):
-    """检查是否为管理员"""
-    # 简单实现：第一个用户或特定邮箱为管理员
-    admin_emails = ["admin@poker.com", "admin@test.com"]
-    if user.email not in admin_emails and user.id != 1:
+    """检查是否为管理员 - 使用 is_superuser 字段"""
+    if not user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized"
+            detail="Admin access required"
         )
 
 

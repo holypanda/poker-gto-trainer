@@ -148,6 +148,21 @@ def get_review(
         from app.schemas.fullhand import FlopSpotReview
         flop_spot = FlopSpotReview(**f)
     
+    # 构建 ShowdownAnalysis
+    showdown_analysis = None
+    if review.get("showdown_analysis"):
+        sa = review["showdown_analysis"]
+        from app.schemas.fullhand import ShowdownAnalysis, PlayerShowdownResult
+        
+        players = [PlayerShowdownResult(**p) for p in sa.get("players", [])]
+        showdown_analysis = ShowdownAnalysis(
+            community_cards=sa.get("community_cards", []),
+            pot=sa.get("pot", 0),
+            players=players,
+            winner_analysis=sa.get("winner_analysis"),
+            explanation=sa.get("explanation", ""),
+        )
+    
     return FullHandReviewResponse(
         hand_id=review["hand_id"],
         result_bb=review["result_bb"],
@@ -156,6 +171,7 @@ def get_review(
         preflop_spot=preflop_spot,
         flop_spot=flop_spot,
         can_replay=review["can_replay"],
+        showdown_analysis=showdown_analysis,
     )
 
 

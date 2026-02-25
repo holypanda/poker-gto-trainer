@@ -373,6 +373,93 @@ const FullHand: React.FC = () => {
           </div>
         </div>
 
+        {/* 摊牌详细分析 */}
+        {review.showdown_analysis && (
+          <div className="bg-gray-800 rounded-xl p-4 mb-4">
+            <h3 className="text-lg font-bold text-white mb-3">
+              🎴 摊牌分析
+            </h3>
+            
+            {/* 公共牌 */}
+            <div className="mb-4">
+              <div className="text-sm text-gray-400 mb-2">公共牌</div>
+              <div className="flex justify-center gap-2">
+                {review.showdown_analysis.community_cards.map((card, idx) => (
+                  <div key={idx} className="w-10 h-14 bg-white rounded flex items-center justify-center text-lg font-bold text-black">
+                    {formatCard(card)}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 底池信息 */}
+            <div className="mb-4 text-center">
+              <div className="text-sm text-gray-400">底池</div>
+              <div className="text-xl font-bold text-yellow-400">
+                {review.showdown_analysis.pot.toFixed(1)} BB
+              </div>
+            </div>
+
+            {/* 所有玩家手牌 */}
+            <div className="mb-4">
+              <div className="text-sm text-gray-400 mb-2">玩家手牌</div>
+              <div className="space-y-2">
+                {review.showdown_analysis.players.map((player) => (
+                  <div 
+                    key={player.seat}
+                    className={`p-3 rounded-lg ${
+                      player.is_winner ? 'bg-green-900/50 border border-green-600' : 
+                      player.is_hero ? 'bg-blue-900/30 border border-blue-600' : 
+                      'bg-gray-700'
+                    } ${!player.in_hand ? 'opacity-50' : ''}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-bold ${player.is_hero ? 'text-blue-400' : 'text-white'}`}>
+                          {player.position}
+                          {player.is_hero && ' (你)'}
+                          {player.is_winner && ' 🏆'}
+                        </span>
+                        {!player.in_hand && (
+                          <span className="text-xs text-gray-500">(弃牌)</span>
+                        )}
+                      </div>
+                      <div className="text-sm text-gray-400">
+                        投入: {player.total_committed.toFixed(1)} BB
+                      </div>
+                    </div>
+                    {player.in_hand && (
+                      <div className="mt-2 flex items-center gap-3">
+                        <div className="flex gap-1">
+                          {player.hole_cards.map((card, idx) => (
+                            <div key={idx} className="w-8 h-11 bg-white rounded flex items-center justify-center text-sm font-bold text-black">
+                              {formatCard(card)}
+                            </div>
+                          ))}
+                        </div>
+                        <div className={`text-sm font-medium ${
+                          player.is_winner ? 'text-green-400' : 'text-gray-300'
+                        }`}>
+                          {player.hand_name}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 详细解释 */}
+            {review.showdown_analysis.explanation && (
+              <div className="bg-gray-700/50 rounded-lg p-3">
+                <div className="text-sm text-gray-300 whitespace-pre-line">
+                  {review.showdown_analysis.explanation}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 翻牌关键点复盘 */}
         {review.flop_spot && (
           <div className="bg-gray-800 rounded-xl p-4 mb-4">

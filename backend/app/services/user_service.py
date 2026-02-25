@@ -33,12 +33,41 @@ def create_user(db: Session, user_create: UserCreate) -> User:
     return db_user
 
 
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_DURATION_MINUTES = 30
+
+
 def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
+    """验证用户并处理账户锁定逻辑"""
     user = get_user_by_email(db, email)
     if not user:
         return None
-    if not verify_password(password, user.hashed_password):
+    
+    # 检查账户是否被锁定
+    if user.locked_until and user.locked_until > datetime.utcnow():
         return None
+    
+    if not verify_password(password, user.hashed_password):
+        # 登录失败，增加尝试次数
+        user.login_attempts += 1
+        
+        # 超过最大尝试次数，锁定账户
+        if user.login_attempts >= MAX_LOGIN_ATTEMPTS:
+            user.locked_until = datetime.utcnow() + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+            user.login_attempts = 0
+        
+        db.commit()
+        return None
+    
+    # 登录成功，重置尝试次数
+    if user.login_attempts > 0:
+        user.login_attempts = 0
+        user.locked_until = None
+    
+    # 更新最后登录时间
+    user.last_login = datetime.utcnow()
+    db.commit()
+    
     return user
 
 

@@ -137,6 +137,28 @@ class FlopSpotReview(BaseModel):
     explanation: str
 
 
+class PlayerShowdownResult(BaseModel):
+    """玩家摊牌结果"""
+    seat: int
+    position: str
+    hole_cards: List[str]
+    is_hero: bool
+    in_hand: bool
+    total_committed: float
+    score: int
+    hand_name: str
+    is_winner: bool
+
+
+class ShowdownAnalysis(BaseModel):
+    """摊牌详细分析"""
+    community_cards: List[str]
+    pot: float
+    players: List[PlayerShowdownResult]
+    winner_analysis: Optional[Dict[str, Any]] = None
+    explanation: str
+
+
 class FullHandReviewResponse(BaseModel):
     """复盘响应"""
     hand_id: int
@@ -146,6 +168,7 @@ class FullHandReviewResponse(BaseModel):
     preflop_spot: Optional[PreflopSpotReview] = None
     flop_spot: Optional[FlopSpotReview] = None
     can_replay: bool  # 是否支持重打 (Pro)
+    showdown_analysis: Optional[ShowdownAnalysis] = None  # 摊牌详细分析
 
 
 class FullHandHistoryItem(BaseModel):

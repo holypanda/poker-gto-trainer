@@ -10,6 +10,15 @@ from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
 
+# 导入 treys 进行牌力评估
+try:
+    from treys import Card, Evaluator
+    HAS_TREYS = True
+except ImportError:
+    HAS_TREYS = False
+    Card = None
+    Evaluator = None
+
 
 class Street(Enum):
     PREFLOP = "preflop"
@@ -347,34 +356,50 @@ class FullHandEngine:
         return hashlib.sha256(str(random.getrandbits(256)).encode()).hexdigest()[:16]
     
     def initialize_game(self) -> None:
-        """初始化游戏"""
-        # 创建玩家
-        self.players = []
-        for i, pos in enumerate(self.POSITIONS_6MAX):
-            is_hero = (i == 4)  # BTN 位置作为 Hero（默认值，后面会随机决定）
-            self.players.append(Player(
-                seat=i,
-                position=pos,
-                stack=float(self.stack_bb),
-                is_hero=is_hero,
-            ))
-        
-        # 随机选择 Hero 座位
+        """初始化游戏 - 严格按照德州扑克规则"""
+        # 首先确定庄家位置
         self.hero_seat = self.rng.randint(0, 5)
-        for p in self.players:
-            p.is_hero = (p.seat == self.hero_seat)
         
-        # 设置按钮位置（Hero 在 BTN 的概率高一些，模拟真实体验）
-        # 按钮在 Hero 后面 0-2 个位置
+        # 庄家在 Hero 后面 0-2 个位置（模拟真实体验）
         btn_offset = self.rng.choices([0, 1, 2], weights=[0.5, 0.3, 0.2])[0]
         self.button_seat = (self.hero_seat - btn_offset) % 6
         self.sb_seat = (self.button_seat + 1) % 6
         self.bb_seat = (self.button_seat + 2) % 6
         
-        # 发牌
+        # 根据庄家位置计算每个座位的位置名称
+        # 6人桌顺序：UTG, MP, CO, BTN, SB, BB
+        position_map = {}
+        position_map[self.button_seat] = "BTN"
+        position_map[self.sb_seat] = "SB"
+        position_map[self.bb_seat] = "BB"
+        
+        # 其他位置：UTG 是 BB 的下一位，然后是 MP, CO
+        utg_seat = (self.bb_seat + 1) % 6
+        mp_seat = (self.bb_seat + 2) % 6
+        co_seat = (self.bb_seat + 3) % 6
+        position_map[utg_seat] = "UTG"
+        position_map[mp_seat] = "MP"
+        position_map[co_seat] = "CO"
+        
+        # 创建玩家
+        self.players = []
+        for seat in range(6):
+            self.players.append(Player(
+                seat=seat,
+                position=position_map[seat],
+                stack=float(self.stack_bb),
+                is_hero=(seat == self.hero_seat),
+            ))
+        
+        # 发牌（从 SB 的下一位开始发）
         self._deck = PokerDeck(self.seed)
-        for p in self.players:
-            p.hole_cards = self._deck.deal(2)
+        deal_start = (self.sb_seat + 1) % 6
+        for i in range(6):
+            seat = (deal_start + i) % 6
+            self.players[seat].hole_cards = self._deck.deal(1)
+        for i in range(6):
+            seat = (deal_start + i) % 6
+            self.players[seat].hole_cards.extend(self._deck.deal(1))
         
         # 放置盲注
         self._post_blinds()
@@ -382,7 +407,7 @@ class FullHandEngine:
         # 设置状态
         self.status = GameStatus.PREFLOP
         self.street = Street.PREFLOP
-        self._to_act_seat = (self.bb_seat + 1) % 6  # UTG
+        self._to_act_seat = (self.bb_seat + 1) % 6  # UTG（BB 的下一位）
         self._update_active_players()
     
     def _post_blinds(self) -> None:
@@ -602,45 +627,77 @@ class FullHandEngine:
         }
     
     def _check_street_end(self) -> Dict[str, Any]:
-        """检查是否结束当前街"""
-        # 找到下一个要行动的玩家
-        active_players = [p for p in self.players if p.in_hand and p.is_active]
+        """检查是否结束当前街 - 严格按照德州扑克规则"""
+        in_hand_players = [p for p in self.players if p.in_hand]
+        active_players = [p for p in in_hand_players if p.is_active]
         
         # 如果只剩一个玩家，结束游戏
-        if len([p for p in self.players if p.in_hand]) == 1:
+        if len(in_hand_players) == 1:
             self._end_game("fold")
             return {"ended": True}
         
-        # 如果所有活跃玩家都已投入相同筹码且有人已行动过
+        # 如果所有在游戏的玩家都已 ALL-IN，直接发完所有牌并摊牌
+        if len(in_hand_players) > 0 and len(active_players) == 0:
+            # 所有剩余玩家都 ALL-IN，快速进入摊牌
+            self._fast_forward_to_showdown()
+            return {"ended": True}
+        
+        # 检查是否所有活跃玩家都已匹配当前最高投注
         if active_players:
             all_matched = all(
                 p.committed_this_street == self.current_bet 
                 for p in active_players
             )
             
-            if all_matched and self._street_actions >= len([p for p in self.players if p.in_hand]):
-                # 进入下一街
-                self._advance_street()
-                return {"advanced": True}
+            # 所有人都跟注或 check 后，进入下一街
+            if all_matched:
+                # 确保每个人都至少有一次行动机会（除了已经 ALL-IN 的）
+                acted_players = len([a for a in self.action_log if a.street == self.street.value])
+                if acted_players >= len([p for p in in_hand_players if p.is_active or p.committed_this_street == self.current_bet]):
+                    self._advance_street()
+                    return {"advanced": True}
             
             # 找到下一个要行动的玩家
             next_seat = (self._to_act_seat + 1) % 6
-            while next_seat != self._to_act_seat:
+            loop_count = 0
+            while loop_count < 6:
                 next_player = self.players[next_seat]
                 if next_player.in_hand and next_player.is_active:
                     self._to_act_seat = next_seat
                     break
                 next_seat = (next_seat + 1) % 6
+                loop_count += 1
             else:
-                # 没有下一个玩家，结束当前街
+                # 没有下一个活跃玩家，结束当前街
                 self._advance_street()
                 return {"advanced": True}
         else:
-            # 没有活跃玩家（都 allin 了）
+            # 没有活跃玩家（都 allin 了），进入下一街
             self._advance_street()
             return {"advanced": True}
         
         return {"advanced": False}
+    
+    def _fast_forward_to_showdown(self) -> None:
+        """所有玩家 ALL-IN，快速发完剩余公共牌并进入摊牌"""
+        # 发完 flop（如果还没发）
+        if self.street == Street.PREFLOP:
+            self.street = Street.FLOP
+            self.community_cards = self._deck.deal(3)
+        
+        # 发完 turn（如果还没发）
+        if self.street == Street.FLOP:
+            self.street = Street.TURN
+            self.community_cards.extend(self._deck.deal(1))
+        
+        # 发完 river（如果还没发）
+        if self.street == Street.TURN:
+            self.street = Street.RIVER
+            self.community_cards.extend(self._deck.deal(1))
+        
+        # 进入摊牌
+        self.street = Street.SHOWDOWN
+        self._end_game("showdown")
     
     def _advance_street(self) -> None:
         """进入下一街"""
@@ -695,19 +752,41 @@ class FullHandEngine:
             winner = [p for p in self.players if p.in_hand][0]
             self.result_bb = winner.total_committed - self.players[self.hero_seat].total_committed
         else:
-            # 摊牌，简化：随机决定胜负
-            # 实际应该比较牌力
-            in_hand_players = [p for p in self.players if p.in_hand]
+            # 摊牌 - 使用 treys 进行牌力比较
             hero = self.players[self.hero_seat]
             
-            if hero.in_hand:
-                # 50% 概率赢（简化版）
-                if self.rng.random() < 0.5:
-                    self.result_bb = self.pot - hero.total_committed
+            if not hero.in_hand:
+                self.result_bb = -hero.total_committed
+            elif not HAS_TREYS:
+                # 没有 treys 库时使用简化逻辑
+                self.result_bb = -hero.total_committed
+            else:
+                # 使用 treys 进行牌力评估
+                evaluator = Evaluator()
+                community_cards = [Card.new(c) for c in self.community_cards]
+                
+                # 评估每个玩家的牌力
+                player_scores = {}
+                for p in self.players:
+                    if p.in_hand and p.hole_cards:
+                        hole_cards = [Card.new(c) for c in p.hole_cards]
+                        score = evaluator.evaluate(community_cards, hole_cards)
+                        player_scores[p.seat] = score
+                
+                # 找到最佳牌力（分数越低越好）
+                if player_scores:
+                    best_score = min(player_scores.values())
+                    winners = [seat for seat, score in player_scores.items() if score == best_score]
+                    
+                    hero_score = player_scores.get(self.hero_seat)
+                    if hero_score is not None and hero_score == best_score:
+                        # Hero 获胜
+                        self.result_bb = self.pot - hero.total_committed
+                    else:
+                        # Hero 输了
+                        self.result_bb = -hero.total_committed
                 else:
                     self.result_bb = -hero.total_committed
-            else:
-                self.result_bb = -hero.total_committed
     
     def get_state(self) -> Dict[str, Any]:
         """获取当前状态"""

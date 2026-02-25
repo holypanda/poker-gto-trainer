@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// API 地址配置
-const API_BASE_URL = 'http://172.236.229.37:8000/api/v1';
+// API 地址配置 - 从环境变量读取，默认使用相对路径
+const API_BASE_URL = process.env.REACT_APP_API_URL || '/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE_URL,

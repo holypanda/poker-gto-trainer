@@ -132,6 +132,18 @@ def get_history(
     db: Session = Depends(get_db)
 ):
     """获取训练历史"""
+    # 验证分页参数
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="limit must be between 1 and 100"
+        )
+    if offset < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="offset must be non-negative"
+        )
+    
     sessions = get_user_training_history(db, current_user.id, limit, offset)
     
     return [

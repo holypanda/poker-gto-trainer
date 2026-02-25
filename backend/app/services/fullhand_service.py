@@ -15,6 +15,13 @@ from app.services.fullhand_engine import FullHandEngine, GameStatus, Street, Han
 from app.services.flop_strategy import FlopStrategyEngine
 from app.services.gto_engine import get_gto_strategy
 
+# 导入 treys 进行牌力评估
+try:
+    from treys import Card, Evaluator
+    HAS_TREYS = True
+except ImportError:
+    HAS_TREYS = False
+
 
 class FullHandService:
     """完整牌局服务"""
@@ -576,12 +583,13 @@ class FullHandService:
         engine._end_game("showdown")
     
     def _generate_review(self, engine: FullHandEngine, user: User) -> Dict[str, Any]:
-        """生成复盘数据"""
+        """生成复盘数据 - 包含摊牌分析"""
         review = {
             "result_bb": round(engine.result_bb, 2) if engine.result_bb is not None else 0.0,
             "ended_by": engine.ended_by or "in_progress",
             "preflop_spot": None,
             "flop_spot": None,
+            "showdown_analysis": None,
         }
         
         # 翻前关键点
@@ -616,10 +624,138 @@ class FullHandService:
                 "explanation": getattr(spot, 'explanation', ''),
             }
         
+        # 添加摊牌分析
+        review["showdown_analysis"] = self._analyze_showdown_from_engine(engine)
+        
         return review
     
+    def _analyze_showdown_from_engine(self, engine: FullHandEngine) -> Dict[str, Any]:
+        """从引擎状态分析摊牌结果"""
+        analysis = {
+            "community_cards": engine.community_cards or [],
+            "pot": engine.pot or 0,
+            "players": [],
+            "winner_analysis": None,
+            "explanation": "",
+        }
+        
+        if not engine.players:
+            return analysis
+        
+        # 使用 treys 评估牌力
+        can_evaluate = (HAS_TREYS and 
+                       engine.community_cards and 
+                       len(engine.community_cards) == 5)
+        
+        if can_evaluate:
+            try:
+                evaluator = Evaluator()
+                board_cards = [Card.new(c) for c in engine.community_cards if len(c) == 2]
+                
+                if len(board_cards) == 5:
+                    player_results = []
+                    for p in engine.players:
+                        if not p.hole_cards:
+                            continue
+                        
+                        hole_cards = [Card.new(c) for c in p.hole_cards if len(c) == 2]
+                        if len(hole_cards) == 2:
+                            score = evaluator.evaluate(board_cards, hole_cards)
+                            hand_rank = evaluator.get_rank_class(score)
+                            hand_name = evaluator.class_to_string(hand_rank)
+                        else:
+                            score = 9999
+                            hand_name = "未知"
+                        
+                        player_result = {
+                            "seat": p.seat,
+                            "position": p.position,
+                            "hole_cards": p.hole_cards,
+                            "is_hero": p.is_hero,
+                            "in_hand": p.in_hand,
+                            "total_committed": p.total_committed,
+                            "score": score,
+                            "hand_name": hand_name,
+                            "is_winner": False,
+                        }
+                        player_results.append(player_result)
+                    
+                    # 确定赢家
+                    if player_results:
+                        in_hand_results = [pr for pr in player_results if pr["in_hand"]]
+                        if in_hand_results:
+                            winner = min(in_hand_results, key=lambda x: x["score"])
+                            winner["is_winner"] = True
+                            
+                            analysis["winner_analysis"] = {
+                                "position": winner["position"],
+                                "hand_name": winner["hand_name"],
+                                "hole_cards": winner["hole_cards"],
+                            }
+                    
+                    analysis["players"] = sorted(player_results, key=lambda x: (not x["in_hand"], x["score"]))
+            except Exception as e:
+                print(f"Error in showdown analysis: {e}")
+        
+        # 无法评估时的简化显示
+        if not analysis["players"]:
+            for p in engine.players:
+                analysis["players"].append({
+                    "seat": p.seat,
+                    "position": p.position,
+                    "hole_cards": p.hole_cards or [],
+                    "is_hero": p.is_hero,
+                    "in_hand": p.in_hand,
+                    "total_committed": p.total_committed,
+                    "score": 9999,
+                    "hand_name": "未知" if p.in_hand else "弃牌",
+                    "is_winner": False,
+                })
+        
+        # 生成解释文字
+        analysis["explanation"] = self._generate_explanation_from_engine(analysis, engine)
+        
+        return analysis
+    
+    def _generate_explanation_from_engine(self, analysis: Dict, engine: FullHandEngine) -> str:
+        """从引擎生成解释文字"""
+        players = analysis.get("players", [])
+        hero = next((p for p in players if p.get("is_hero")), None)
+        winner = next((p for p in players if p.get("is_winner")), None)
+        
+        if not hero:
+            return "无法获取 Hero 信息"
+        
+        if engine.ended_by == "fold":
+            return f"本局通过弃牌结束。你在本局投入了 {hero.get('total_committed', 0):.1f} BB。"
+        
+        if not hero.get("in_hand"):
+            return f"你在摊牌前弃牌，失去了底池。本局投入了 {hero.get('total_committed', 0):.1f} BB。"
+        
+        hero_hand = hero.get("hand_name", "未知")
+        
+        if winner and winner.get("is_hero"):
+            other_players = [p for p in players if p.get("in_hand") and not p.get("is_hero")]
+            if other_players:
+                best_opponent = min(other_players, key=lambda x: x.get("score", 9999))
+                return f"🎉 恭喜你获胜！你的 {hero_hand} 击败了对手的 {best_opponent.get('hand_name', '未知')}。赢得 {engine.pot:.1f} BB！"
+            return f"🎉 恭喜你获胜！你的 {hero_hand} 是最大牌。赢得 {engine.pot:.1f} BB！"
+        elif winner:
+            winner_hand = winner.get("hand_name", "未知")
+            winner_pos = winner.get("position", "对手")
+            
+            explanation = f"😔 你输了。你的 {hero_hand} 不敌 {winner_pos} 的 {winner_hand}。\n\n"
+            explanation += f"📊 详细对比:\n"
+            explanation += f"  你: {hero.get('hole_cards', [])} → {hero_hand}\n"
+            explanation += f"  {winner_pos}: {winner.get('hole_cards', [])} → {winner_hand}\n"
+            explanation += f"  公共牌: {analysis.get('community_cards', [])}\n\n"
+            explanation += f"💰 你投入了 {hero.get('total_committed', 0):.1f} BB，本局损失 {abs(engine.result_bb or 0):.1f} BB。"
+            return explanation
+        
+        return "摊牌结果分析中..."
+    
     def get_review(self, session_id: int, user: User) -> Dict[str, Any]:
-        """获取复盘"""
+        """获取复盘 - 增强版，包含详细牌局分析"""
         session = self.db.query(FullHandSession).filter(
             FullHandSession.id == session_id,
             FullHandSession.user_id == user.id
@@ -638,6 +774,10 @@ class FullHandService:
             "preflop_spot": None,
             "flop_spot": None,
         }
+        
+        # 添加详细牌局分析
+        showdown_analysis = self._analyze_showdown(session)
+        review["showdown_analysis"] = showdown_analysis
         
         # 翻前关键点
         if session.preflop_key_spot:
@@ -672,6 +812,189 @@ class FullHandService:
             }
         
         return review
+    
+    def _analyze_showdown(self, session: FullHandSession) -> Dict[str, Any]:
+        """分析摊牌结果，返回详细的牌局分析 - 使用 seed 重新生成完整游戏状态"""
+        analysis = {
+            "community_cards": session.community_cards or [],
+            "pot": session.pot or 0,
+            "players": [],
+            "hero_analysis": None,
+            "winner_analysis": None,
+            "explanation": "",
+        }
+        
+        if not session.players or not session.hand_seed:
+            return analysis
+        
+        # 使用相同的 seed 重新初始化引擎来获取完整游戏状态
+        try:
+            engine = FullHandEngine(stack_bb=session.stack_bb, seed=session.hand_seed)
+            engine.initialize_game()
+            
+            # 重放所有行动到结束
+            for action_dict in session.action_log or []:
+                if action_dict["action"] not in ["sb", "bb"]:
+                    engine._to_act_seat = action_dict["seat"]
+                    try:
+                        engine.process_action(action_dict["action"], action_dict.get("amount"))
+                    except:
+                        pass
+            
+            # 如果 action log 不完整（游戏已结束但引擎还没结束），自动完成游戏
+            if session.ended_by and not engine.ended_by:
+                # 自动 check 到摊牌
+                max_steps = 20
+                step = 0
+                while engine.street.value not in ["showdown", "ENDED"] and step < max_steps:
+                    legal = engine.get_legal_actions(engine._to_act_seat)
+                    if not legal:
+                        break
+                    if "check" in legal:
+                        engine.process_action("check")
+                    elif "call" in legal:
+                        engine.process_action("call")
+                    else:
+                        engine.process_action("fold")
+                    step += 1
+            
+            # 获取完整玩家信息（包括所有手牌）
+            players_data = []
+            for p in engine.players:
+                players_data.append({
+                    "seat": p.seat,
+                    "position": p.position,
+                    "hole_cards": p.hole_cards,
+                    "is_hero": p.is_hero,
+                    "in_hand": p.in_hand,
+                    "total_committed": p.total_committed,
+                })
+            
+            analysis["community_cards"] = engine.community_cards
+            analysis["pot"] = engine.pot
+        except Exception as e:
+            print(f"Error replaying game: {e}")
+            # 回退到数据库中的数据
+            players_data = session.players if isinstance(session.players, list) else []
+        
+        # 使用 treys 评估牌力（需要完整 5 张公共牌）
+        can_evaluate = (HAS_TREYS and 
+                       analysis["community_cards"] and 
+                       len(analysis["community_cards"]) == 5)
+        
+        if can_evaluate:
+            try:
+                evaluator = Evaluator()
+                board_cards = [Card.new(c) for c in analysis["community_cards"] if len(c) == 2]
+                
+                if len(board_cards) == 5:
+                    player_results = []
+                    for p in players_data:
+                        if not p.get("hole_cards"):
+                            continue
+                        
+                        hole_cards = [Card.new(c) for c in p["hole_cards"] if len(c) == 2]
+                        if len(hole_cards) == 2:
+                            score = evaluator.evaluate(board_cards, hole_cards)
+                            hand_rank = evaluator.get_rank_class(score)
+                            hand_name = evaluator.class_to_string(hand_rank)
+                        else:
+                            score = 9999
+                            hand_name = "未知"
+                        
+                        player_result = {
+                            "seat": p.get("seat"),
+                            "position": p.get("position"),
+                            "hole_cards": p.get("hole_cards"),
+                            "is_hero": p.get("is_hero", False),
+                            "in_hand": p.get("in_hand", False),
+                            "total_committed": p.get("total_committed", 0),
+                            "score": score,
+                            "hand_name": hand_name,
+                            "is_winner": False,
+                        }
+                        player_results.append(player_result)
+                    
+                    # 确定赢家
+                    if player_results:
+                        in_hand_results = [pr for pr in player_results if pr["in_hand"]]
+                        if in_hand_results:
+                            winner = min(in_hand_results, key=lambda x: x["score"])
+                            winner["is_winner"] = True
+                            
+                            analysis["winner_analysis"] = {
+                                "position": winner["position"],
+                                "hand_name": winner["hand_name"],
+                                "hole_cards": winner["hole_cards"],
+                            }
+                    
+                    analysis["players"] = sorted(player_results, key=lambda x: (not x["in_hand"], x["score"]))
+                else:
+                    can_evaluate = False
+            except Exception as e:
+                print(f"Error in showdown analysis: {e}")
+                can_evaluate = False
+        
+        # 无法评估时的简化显示
+        if not analysis["players"]:
+            analysis["players"] = []
+            for p in players_data:
+                analysis["players"].append({
+                    "seat": p.get("seat"),
+                    "position": p.get("position"),
+                    "hole_cards": p.get("hole_cards") or [],
+                    "is_hero": p.get("is_hero", False),
+                    "in_hand": p.get("in_hand", False),
+                    "total_committed": p.get("total_committed", 0),
+                    "score": 9999,
+                    "hand_name": "未知" if p.get("in_hand") else "弃牌",
+                    "is_winner": False,
+                })
+        
+        # 生成解释文字
+        analysis["explanation"] = self._generate_explanation(analysis, session)
+        
+        return analysis
+    
+    def _generate_explanation(self, analysis: Dict, session: FullHandSession) -> str:
+        """生成输赢解释文字"""
+        players = analysis.get("players", [])
+        hero = next((p for p in players if p.get("is_hero")), None)
+        winner = next((p for p in players if p.get("is_winner")), None)
+        
+        if not hero:
+            return "无法获取 Hero 信息"
+        
+        if session.ended_by == "fold":
+            return f"本局通过弃牌结束。你在本局投入了 {hero.get('total_committed', 0):.1f} BB。"
+        
+        if not hero.get("in_hand"):
+            return f"你在摊牌前弃牌，失去了底池。本局投入了 {hero.get('total_committed', 0):.1f} BB。"
+        
+        hero_hand = hero.get("hand_name", "未知")
+        
+        if winner and winner.get("is_hero"):
+            # Hero 获胜
+            other_players = [p for p in players if p.get("in_hand") and not p.get("is_hero")]
+            if other_players:
+                best_opponent = min(other_players, key=lambda x: x.get("score", 9999))
+                return f"🎉 恭喜你获胜！你的 {hero_hand} 击败了对手的 {best_opponent.get('hand_name', '未知')}。赢得 {session.pot:.1f} BB！"
+            return f"🎉 恭喜你获胜！你的 {hero_hand} 是最大牌。赢得 {session.pot:.1f} BB！"
+        elif winner:
+            # Hero 输了
+            winner_hand = winner.get("hand_name", "未知")
+            winner_cards = winner.get("hole_cards", [])
+            winner_pos = winner.get("position", "对手")
+            
+            explanation = f"😔 你输了。你的 {hero_hand} 不敌 {winner_pos} 的 {winner_hand}。\n\n"
+            explanation += f"📊 详细对比:\n"
+            explanation += f"  你: {hero.get('hole_cards', [])} → {hero_hand}\n"
+            explanation += f"  {winner_pos}: {winner_cards} → {winner_hand}\n"
+            explanation += f"  公共牌: {analysis.get('community_cards', [])}\n\n"
+            explanation += f"💰 你投入了 {hero.get('total_committed', 0):.1f} BB，本局损失 {abs(session.result_bb or 0):.1f} BB。"
+            return explanation
+        
+        return "摊牌结果分析中..."
     
     def replay_hand(self, session_id: int, user: User) -> FullHandSession:
         """重打同一手"""

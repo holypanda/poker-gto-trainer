@@ -41,6 +41,13 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    # 检查用户是否活跃
+    if hasattr(user, 'is_active') and not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is disabled"
+        )
+    
     return user
 
 

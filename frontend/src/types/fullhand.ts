@@ -121,6 +121,30 @@ export interface FlopSpotReview {
   explanation: string;
 }
 
+export interface PlayerShowdownResult {
+  seat: number;
+  position: string;
+  hole_cards: string[];
+  is_hero: boolean;
+  in_hand: boolean;
+  total_committed: number;
+  score: number;
+  hand_name: string;
+  is_winner: boolean;
+}
+
+export interface ShowdownAnalysis {
+  community_cards: string[];
+  pot: number;
+  players: PlayerShowdownResult[];
+  winner_analysis?: {
+    position: string;
+    hand_name: string;
+    hole_cards: string[];
+  };
+  explanation: string;
+}
+
 export interface FullHandReview {
   hand_id: number;
   result_bb: number;
@@ -129,6 +153,7 @@ export interface FullHandReview {
   preflop_spot?: PreflopSpotReview;
   flop_spot?: FlopSpotReview;
   can_replay: boolean;
+  showdown_analysis?: ShowdownAnalysis;
 }
 
 export interface FullHandStats {

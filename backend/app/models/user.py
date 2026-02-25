@@ -12,6 +12,15 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     
+    # User status
+    is_active = Column(Boolean, default=True)
+    is_superuser = Column(Boolean, default=False)
+    
+    # Account security
+    login_attempts = Column(Integer, default=0)
+    locked_until = Column(DateTime, nullable=True)
+    last_login = Column(DateTime, nullable=True)
+    
     # 统计
     total_trains = Column(Integer, default=0)
     correct_trains = Column(Integer, default=0)
