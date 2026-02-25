@@ -1,0 +1,97 @@
+version: '3.8'
+
+# 生产环境部署配置 V1.0
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-poker}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme_in_production}
+      POSTGRES_DB: ${DB_NAME:-poker_gto}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"  # 仅本地访问
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-poker} -d ${DB_NAME:-poker_gto}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - poker-network
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"  # 仅本地访问
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - poker-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: always
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - DEBUG=false
+      - ALIPAY_APP_ID=${ALIPAY_APP_ID}
+      - ALIPAY_PRIVATE_KEY=${ALIPAY_PRIVATE_KEY}
+      - ALIPAY_PUBLIC_KEY=${ALIPAY_PUBLIC_KEY}
+      - ALIPAY_GATEWAY=${ALIPAY_GATEWAY}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - poker-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    restart: always
+    depends_on:
+      - backend
+    networks:
+      - poker-network
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - frontend_build:/usr/share/nginx/html:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - poker-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  frontend_build:
+
+networks:
+  poker-network:
+    driver: bridge

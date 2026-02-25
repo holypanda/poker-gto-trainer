@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    /* 防止 iOS 缩放 */
+    -webkit-text-size-adjust: 100%;
+    /* 平滑滚动 */
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    @apply bg-gray-900 text-white;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* 防止页面滚动弹跳 */
+    overscroll-behavior: none;
+    /* 防止选中文字 */
+    -webkit-user-select: none;
+    user-select: none;
+    /* 适配 iPhone 刘海屏 */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  /* 允许输入框选中 */
+  input, textarea {
+    -webkit-user-select: auto;
+    user-select: auto;
+  }
+  
+  /* 禁用双击缩放 */
+  * {
+    touch-action: manipulation;
+  }
+}
+
+@layer components {
+  .poker-card {
+    @apply bg-white rounded-lg shadow-lg p-4 transition-all duration-200;
+    aspect-ratio: 2.5/3.5;
+  }
+  
+  .poker-card.red {
+    @apply text-red-600;
+  }
+  
+  .poker-card.black {
+    @apply text-gray-900;
+  }
+  
+  .poker-table {
+    @apply rounded-full bg-poker-felt relative;
+    box-shadow: inset 0 0 100px rgba(0,0,0,0.5), 0 10px 30px rgba(0,0,0,0.3);
+  }
+  
+  .btn-primary {
+    @apply bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition-colors duration-200;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg transition-colors duration-200;
+  }
+  
+  .btn-success {
+    @apply bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition-colors duration-200;
+  }
+  
+  .btn-danger {
+    @apply bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg transition-colors duration-200;
+  }
+  
+  .stat-card {
+    @apply bg-gray-800 rounded-xl p-4 border border-gray-700;
+  }
+  
+  .position-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+  
+  .position-badge-btn {
+    @apply bg-blue-100 text-blue-800;
+  }
+  
+  .position-badge-co {
+    @apply bg-green-100 text-green-800;
+  }
+  
+  .position-badge-mp {
+    @apply bg-yellow-100 text-yellow-800;
+  }
+  
+  .position-badge-utg {
+    @apply bg-red-100 text-red-800;
+  }
+  
+  .position-badge-sb {
+    @apply bg-purple-100 text-purple-800;
+  }
+  
+  .position-badge-bb {
+    @apply bg-gray-100 text-gray-800;
+  }
+}
+
+@layer utilities {
+  .text-shadow {
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  }
+  
+  .glow-green {
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.5);
+  }
+  
+  .glow-red {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+  }
+  
+  .glow-gold {
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+  }
+}

@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# Database
+postgres_data/
+redis_data/
+*.dump
+*.sql.gz
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+
+# Backup
+backups/
+!backups/.gitkeep
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/

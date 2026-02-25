@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: poker
+      POSTGRES_PASSWORD: poker123
+      POSTGRES_DB: poker_gto
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poker -d poker_gto"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://poker:poker123@db:5432/poker_gto
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - ALIPAY_APP_ID=${ALIPAY_APP_ID}
+      - ALIPAY_PRIVATE_KEY=${ALIPAY_PRIVATE_KEY}
+      - ALIPAY_PUBLIC_KEY=${ALIPAY_PUBLIC_KEY}
+      - ALIPAY_GATEWAY=https://openapi.alipay.com/gateway.do
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - WATCHPACK_POLLING=true
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
